@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 
 from keras.layers import Input, Conv2D, MaxPooling2D, ZeroPadding2D, Add, Activation
-from keras.layers.normalization import BatchNormalization
+from keras.layers import BatchNormalization
 from keras.models import Model
 from keras import initializers
-from keras.engine import Layer, InputSpec
+from keras.layers import Layer, InputSpec
 from keras import backend as K
 
 import sys
+
 sys.setrecursionlimit(3000)
+
 
 class Scale(Layer):
     '''Learns a set of weights and biases used for scaling the input data.
@@ -39,7 +41,8 @@ class Scale(Layer):
             Theano/TensorFlow function to use for weights initialization.
             This parameter is only relevant if you don't pass a `weights` argument.
     '''
-    def __init__(self, weights=None, axis=-1, momentum = 0.9, beta_init='zero', gamma_init='one', **kwargs):
+
+    def __init__(self, weights=None, axis=-1, momentum=0.9, beta_init='zero', gamma_init='one', **kwargs):
         self.momentum = momentum
         self.axis = axis
         self.beta_init = initializers.get(beta_init)
@@ -53,7 +56,7 @@ class Scale(Layer):
 
         self.gamma = K.variable(self.gamma_init(shape), name='{}_gamma'.format(self.name))
         self.beta = K.variable(self.beta_init(shape), name='{}_beta'.format(self.name))
-        self.trainable_weights = [self.gamma, self.beta]
+        self._trainable_weights = [self.gamma, self.beta]
         if self.initial_weights is not None:
             self.set_weights(self.initial_weights)
             del self.initial_weights
@@ -70,6 +73,7 @@ class Scale(Layer):
         config = {"momentum": self.momentum, "axis": self.axis}
         base_config = super(Scale, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
 
 def identity_block(input_tensor, kernel_size, filters, stage, block):
     '''The identity_block is the block that has no conv layer at shortcut
@@ -93,7 +97,7 @@ def identity_block(input_tensor, kernel_size, filters, stage, block):
 
     x = ZeroPadding2D((1, 1), name=conv_name_base + '2b_zeropadding')(x)
     x = Conv2D(nb_filter2, kernel_size,
-                      name=conv_name_base + '2b', use_bias=False)(x)
+               name=conv_name_base + '2b', use_bias=False)(x)
     x = BatchNormalization(epsilon=eps, axis=bn_axis, name=bn_name_base + '2b')(x)
     x = Scale(axis=bn_axis, name=scale_name_base + '2b')(x)
     x = Activation('relu', name=conv_name_base + '2b_relu')(x)
@@ -105,6 +109,7 @@ def identity_block(input_tensor, kernel_size, filters, stage, block):
     x = Add(name='res' + str(stage) + block)([x, input_tensor])
     x = Activation('relu', name='res' + str(stage) + block + '_relu')(x)
     return x
+
 
 def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2)):
     '''conv_block is the block that has a conv layer at shortcut
@@ -124,14 +129,14 @@ def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2))
     scale_name_base = 'scale' + str(stage) + block + '_branch'
 
     x = Conv2D(nb_filter1, (1, 1), strides=strides,
-                      name=conv_name_base + '2a', use_bias=False)(input_tensor)
+               name=conv_name_base + '2a', use_bias=False)(input_tensor)
     x = BatchNormalization(epsilon=eps, axis=bn_axis, name=bn_name_base + '2a')(x)
     x = Scale(axis=bn_axis, name=scale_name_base + '2a')(x)
     x = Activation('relu', name=conv_name_base + '2a_relu')(x)
 
     x = ZeroPadding2D((1, 1), name=conv_name_base + '2b_zeropadding')(x)
     x = Conv2D(nb_filter2, kernel_size,
-                      name=conv_name_base + '2b', use_bias=False)(x)
+               name=conv_name_base + '2b', use_bias=False)(x)
     x = BatchNormalization(epsilon=eps, axis=bn_axis, name=bn_name_base + '2b')(x)
     x = Scale(axis=bn_axis, name=scale_name_base + '2b')(x)
     x = Activation('relu', name=conv_name_base + '2b_relu')(x)
@@ -141,13 +146,14 @@ def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2))
     x = Scale(axis=bn_axis, name=scale_name_base + '2c')(x)
 
     shortcut = Conv2D(nb_filter3, (1, 1), strides=strides,
-                             name=conv_name_base + '1', use_bias=False)(input_tensor)
+                      name=conv_name_base + '1', use_bias=False)(input_tensor)
     shortcut = BatchNormalization(epsilon=eps, axis=bn_axis, name=bn_name_base + '1')(shortcut)
     shortcut = Scale(axis=bn_axis, name=scale_name_base + '1')(shortcut)
 
     x = Add(name='res' + str(stage) + block)([x, shortcut])
     x = Activation('relu', name='res' + str(stage) + block + '_relu')(x)
     return x
+
 
 def resnet101_model(input_shape, weights_path=None):
     '''Instantiate the ResNet101 architecture,
@@ -168,32 +174,32 @@ def resnet101_model(input_shape, weights_path=None):
     x = BatchNormalization(epsilon=eps, axis=bn_axis, name='bn_conv1')(x)
     x = Scale(axis=bn_axis, name='scale_conv1')(x)
     x = Activation('relu', name='conv1_relu')(x)
-    x = MaxPooling2D((3, 3), strides=(2, 2), name='pool1', padding = 'same')(x)
-    
+    x = MaxPooling2D((3, 3), strides=(2, 2), name='pool1', padding='same')(x)
+
     # Block 1
-    x = conv_block(x, (3,3), [64, 64, 256], stage=2, block='a', strides=(1,1)) #conv2_1
-    x = identity_block(x, (3,3), [64, 64, 256], stage=2, block='b') #conv2_2
-    block_1_out = identity_block(x, (3,3), [64, 64, 256], stage=2, block='c') #conv2_3
+    x = conv_block(x, (3, 3), [64, 64, 256], stage=2, block='a', strides=(1, 1))  # conv2_1
+    x = identity_block(x, (3, 3), [64, 64, 256], stage=2, block='b')  # conv2_2
+    block_1_out = identity_block(x, (3, 3), [64, 64, 256], stage=2, block='c')  # conv2_3
 
     # Block 2
-    x = conv_block(block_1_out, (3,3), [128, 128, 512], stage=3, block='a') #conv3_1
-    for i in range(1,3):
-      x = identity_block(x, (3,3), [128, 128, 512], stage=3, block='b'+str(i)) #conv3_2-3
-    block_2_out = identity_block(x, (3,3), [128, 128, 512], stage=3, block='b3') #conv3_4
+    x = conv_block(block_1_out, (3, 3), [128, 128, 512], stage=3, block='a')  # conv3_1
+    for i in range(1, 3):
+        x = identity_block(x, (3, 3), [128, 128, 512], stage=3, block='b' + str(i))  # conv3_2-3
+    block_2_out = identity_block(x, (3, 3), [128, 128, 512], stage=3, block='b3')  # conv3_4
 
     # Block 3
-    x = conv_block(block_2_out, (3,3), [256, 256, 1024], stage=4, block='a') #conv4_1
-    for i in range(1,22):
-      x = identity_block(x, (3,3), [256, 256, 1024], stage=4, block='b'+str(i)) #conv4_2-22
-    block_3_out = identity_block(x, (3,3), [256, 256, 1024], stage=4, block='b22') #conv4_23
+    x = conv_block(block_2_out, (3, 3), [256, 256, 1024], stage=4, block='a')  # conv4_1
+    for i in range(1, 22):
+        x = identity_block(x, (3, 3), [256, 256, 1024], stage=4, block='b' + str(i))  # conv4_2-22
+    block_3_out = identity_block(x, (3, 3), [256, 256, 1024], stage=4, block='b22')  # conv4_23
 
     # Block 4
-    x = conv_block(block_3_out, (3,3), [512, 512, 2048], stage=5, block='a') #conv5_1
-    x = identity_block(x, (3,3), [512, 512, 2048], stage=5, block='b') #conv5_2
-    block_4_out = identity_block(x, (3,3), [512, 512, 2048], stage=5, block='c') #conv5_3
-    
-    model = Model(inputs = [img_input], outputs = [block_4_out, block_3_out, block_2_out, block_1_out])
-  
+    x = conv_block(block_3_out, (3, 3), [512, 512, 2048], stage=5, block='a')  # conv5_1
+    x = identity_block(x, (3, 3), [512, 512, 2048], stage=5, block='b')  # conv5_2
+    block_4_out = identity_block(x, (3, 3), [512, 512, 2048], stage=5, block='c')  # conv5_3
+
+    model = Model(inputs=[img_input], outputs=[block_4_out, block_3_out, block_2_out, block_1_out])
+
     if weights_path:
         model.load_weights(weights_path, by_name=True)
         print('Frontend weights loaded.')

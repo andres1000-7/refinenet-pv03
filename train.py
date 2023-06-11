@@ -9,89 +9,249 @@ from model.refinenet import build_refinenet
 
 from keras.optimizers import Adam
 from keras.callbacks import ModelCheckpoint
+import numpy as np
+import pandas as pd
+import shutil
+import tensorflow as tf
+from zipfile import ZipFile
+import keras.backend as K
+from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
+import os
+from PIL import Image
 
-#### Define parameters
-# Dataset
-dataset_basepath = r'C:\Projects\MSc Thesis\data\Minicity'
-train_images = os.path.join(dataset_basepath,'training/images')
-train_masks = os.path.join(dataset_basepath,'training/labels')
-val_images = os.path.join(dataset_basepath,'validation/images')
-val_masks = os.path.join(dataset_basepath,'validation/labels')
-class_dict = 'class_dict.csv'
 
-# ResNet
-frontend_weights = r'model/resnet101_weights_tf.h5'
-frontend_trainable = True
+def prepare_dataframe(image_path, name):
+    solar_ids = []
+    paths = []
+    for dirname, _, filenames in os.walk(image_path):
+        for filename in filenames:
+            path = os.path.join(dirname, filename)
+            paths.append(path)
 
-# Input dimensions (height, width, channels)
-input_shape = (512,1024,3)
-random_crop = (384,768,3) # or None if no random cropping required
+            solar_id = filename.split(".")[0]
+            solar_ids.append(solar_id)
 
-# Train settings
-pre_trained_weights = None
-batch_size = 4
-epochs = 1
-lr_init = 1e-4
-validation_images = 4
-aug_dict = {'rotation_range': 10, 
-            'height_shift_range': 0.1,
-            'width_shift_range': 0.1,
-            'shear_range': 0.1,
-            'zoom_range': 0.1,
-            'horizontal_flip': True,
-            'vertical_flip': False,
-            'brightness_range': (0.7, 1.3)}
-lrate = step_decay_schedule(initial_lr = lr_init, decay_factor = 0.1, step_size = 25)
+    d = {"id": solar_ids, name: paths}
+    df = pd.DataFrame(data=d)
+    df = df.set_index('id')
+    return df
 
-# Import classes from csv file
-mask_colors, num_class = get_label_info(os.path.join(dataset_basepath,class_dict))
-   
-dirs = gen_dirs()
 
-# Data generators for training
-myTrainGen = customGenerator(batch_size, train_images, train_masks, num_class, input_shape, aug_dict, mask_colors, random_crop = random_crop)
-myValGen = customGenerator(batch_size, val_images, val_masks, num_class, input_shape, dict(), mask_colors, random_crop = random_crop)
-steps_per_epoch = 3 #myTrainGen.num_samples // batch_size + 1
+def display(display_list):
+    plt.figure(figsize=(15, 15))
 
-# Define callbacks
-model_checkpoint = ModelCheckpoint(
-        dirs['weight_dir']+'/weights.{epoch:02d}-{val_loss:.2f}.hdf5',
-        monitor = 'val_loss', verbose = 1, save_best_only = True)
-tbCallBack = TensorBoardWrapper(myValGen.generator(), validation_images // batch_size,
-                                batch_size, log_dir=dirs['run_dir'], histogram_freq=0,
-                                write_graph=True, write_grads=True,
-                                batch_size=batch_size, write_images=False)
-history = LossHistory(dirs['batch_log_path'], dirs['epoch_log_path'])
+    title = ['Input Image', 'True Mask', 'Predicted Mask']
 
-tmp_data = next(myValGen.generator())[0]
-save_imgs = OutputObserver(tmp_data, dirs['img_dir'], mask_colors)
+    for i in range(len(display_list)):
+        plt.subplot(1, len(display_list), i + 1)
+        plt.title(title[i])
+        plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[i]))
+        plt.axis('off')
+    plt.show()
 
-# Build and compile RefineNet
-input_shape = random_crop if random_crop else input_shape # adjust network input for random cropping
-model = build_refinenet(input_shape, num_class, resnet_weights = frontend_weights, frontend_trainable = frontend_trainable)
-model.compile(optimizer = Adam(lr=lr_init), loss = ignore_unknown_xentropy, metrics = ['accuracy'])
 
-if pre_trained_weights:
-    model.load_weights(pre_trained_weights)
+# copy all images to image folder and save labels to label folder with same name as correspoding image
 
-save_settings(dirs['settings_path'],
-                dirs['summary_path'],
-                frontend_trainable = frontend_trainable,
-                datagen_args = aug_dict,
-                batch_size = batch_size,
-                input_shape = input_shape,
-                dataset_basepath = dataset_basepath,
-                frontend_weights = frontend_weights,
-                steps_per_epoch = steps_per_epoch,
-                epochs = epochs,
-                pre_trained_weights = pre_trained_weights,
-                model = model,
-                lr_init = lr_init)
+root_dir = '/lustre/fs1/home/crcvreu.student7/PV_Projects/PV03'
+resolution = 'PV03'
+data_dir = os.path.join(root_dir)  # ,resolution)
 
-# Start training
-model.fit_generator(myTrainGen.generator(),
-                    steps_per_epoch = steps_per_epoch,
-                    validation_data = myValGen.generator(),
-                    validation_steps = validation_images // batch_size,
-                    epochs = epochs,
-                    callbacks = [model_checkpoint, tbCallBack, lrate, history, save_imgs])
+image_root = '/lustre/fs1/home/crcvreu.student7/PV_Projects/train'
+label_root = '/lustre/fs1/home/crcvreu.student7/PV_Projects/train_masks'
+# if not os.path.isdir(image_root):
+#     os.mkdir(image_root)
+# if not os.path.isdir(label_root):
+#     os.mkdir(label_root)
+#
+# images = list()
+# labels = list()
+
+# for (dirpath, dirnames, filenames) in os.walk(data_dir):
+#     # img_names += [os.path.join(dirpath, file) for file in filenames]
+#     images += [os.path.join(dirpath, file) for file in filenames]
+#
+# labels += [i for i in filter(lambda score: '_label.bmp' in score, images)]
+# images = [i for i in filter(lambda score: '_label.bmp' not in score, images)]
+#
+# for img_path in images:
+#     src_path = img_path
+#     dst_path = os.path.join(image_root,os.path.basename(img_path))
+#     img = Image.open(src_path)
+#     new_img = img.resize( (256, 256) )
+#     new_img.save( dst_path[:-4]+'.png', 'png')
+#
+# for label_path in labels:
+#     src_path = label_path
+#     file_name = os.path.basename(label_path).replace('_label','')
+#     dst_path = os.path.join(label_root,file_name)
+#     img = Image.open(src_path)
+#     new_img = img.resize( (256, 256) )
+#     new_img.save( dst_path[:-4]+'.png', 'png')
+
+print("Train set:", len(os.listdir(image_root)))
+print("Train masks:", len(os.listdir(label_root)))
+
+df = prepare_dataframe(image_root, "solar_path")
+mask_df = prepare_dataframe(label_root, "mask_path")
+df["mask_path"] = mask_df["mask_path"]
+
+img_size = [256, 256]
+
+
+def data_augmentation(solar_img, mask_img):
+    if tf.random.uniform(()) > 0.5:
+        solar_img = tf.image.flip_left_right(solar_img)
+        mask_img = tf.image.flip_left_right(mask_img)
+
+    return solar_img, mask_img
+
+
+def preprocessing(solar_path, mask_path):
+    solar_img = tf.io.read_file(solar_path)
+    solar_img = tf.image.decode_jpeg(solar_img, channels=3)
+    solar_img = tf.image.resize(solar_img, img_size)
+    solar_img = tf.cast(solar_img, tf.float32) / 255.0
+
+    mask_img = tf.io.read_file(mask_path)
+    mask_img = tf.image.decode_jpeg(mask_img, channels=3)
+    mask_img = tf.image.resize(mask_img, img_size)
+    mask_img = mask_img[:, :, :1]
+    mask_img = tf.math.sign(mask_img)
+
+    return solar_img, mask_img
+
+
+def create_dataset(df, train=False):
+    if not train:
+        ds = tf.data.Dataset.from_tensor_slices((df["solar_path"].values, df["mask_path"].values))
+        ds = ds.map(preprocessing, tf.data.AUTOTUNE)
+    else:
+        ds = tf.data.Dataset.from_tensor_slices((df["solar_path"].values, df["mask_path"].values))
+        ds = ds.map(preprocessing, tf.data.AUTOTUNE)
+        ds = ds.map(data_augmentation, tf.data.AUTOTUNE)
+
+    return ds
+
+
+# Now we will split the dataset into train and test
+train_df, valid_df = train_test_split(df, random_state=42, test_size=.25)
+train = create_dataset(train_df, train=True)
+valid = create_dataset(valid_df)
+
+TRAIN_LENGTH = len(train_df)
+BATCH_SIZE = 24
+BUFFER_SIZE = 1000
+
+train_dataset = train.cache().shuffle(BUFFER_SIZE).batch(BATCH_SIZE).repeat()
+train_dataset = train_dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
+valid_dataset = valid.batch(BATCH_SIZE)
+
+# # Let's look the image and it's corresponding mask
+# for i in range(5):
+#     for image, mask in train.take(i):
+#         sample_image, sample_mask = image, mask
+#         display([sample_image, sample_mask])
+
+
+def dice_coef(y_true, y_pred, smooth=1):
+    intersection = K.sum(y_true * y_pred, axis=[1, 2, 3])
+    union = K.sum(y_true, axis=[1, 2, 3]) + K.sum(y_pred, axis=[1, 2, 3])
+    return K.mean((2. * intersection + smooth) / (union + smooth), axis=0)
+
+
+def dice_loss(in_gt, in_pred):
+    return 1 - dice_coef(in_gt, in_pred)
+
+
+model = build_refinenet(input_shape=(256, 256, 3), num_class=1, resnet_weights=None, frontend_trainable=True)
+
+model.compile(optimizer='adam',
+              loss=dice_loss,
+              metrics=[dice_coef, 'accuracy'])
+
+for images, masks in train_dataset.take(1):
+    for img, mask in zip(images, masks):
+        sample_image = img
+        sample_mask = mask
+        break
+
+
+def visualize(display_list, save_path=None):
+    plt.figure(figsize=(15, 15))
+    title = ['Input Image', 'True Mask', 'Predicted Mask']
+    for i in range(len(display_list)):
+        plt.subplot(1, len(display_list), i + 1)
+        plt.title(title[i])
+        plt.imshow(tf.keras.preprocessing.image.array_to_img(display_list[i]))
+        # SAVE IMAGE
+        plt.axis('off')
+
+    if save_path:
+        plt.savefig('/lustre/fs1/home/crcvreu.student7/PV_Projects/refinenet-keras' + save_path)  # Save the image to the specified path
+
+    plt.show()
+
+
+fig_count = 0
+
+
+def show_predictions(sample_image, sample_mask):
+    global fig_count  # Declare fig_count as a global variable
+    path = '/output' + str(fig_count)
+    fig_count += 1
+    pred_mask = model.predict(sample_image[tf.newaxis, ...])
+    pred_mask = pred_mask.reshape(img_size[0], img_size[1], 1)
+    visualize(display_list=[sample_image, sample_mask, pred_mask], save_path=path)
+
+
+# show_predictions(sample_image, sample_mask)
+
+model.summary()
+
+early_stop = tf.keras.callbacks.EarlyStopping(patience=4, restore_best_weights=True)
+
+
+# Let's observe how the model improves while it is training.
+# To accomplish this task, a callback function is defined below.
+class DisplayCallback(tf.keras.callbacks.Callback):
+    def on_epoch_begin(self, epoch, logs=None):
+        if (epoch + 1) % 5 == 0:
+            show_predictions(sample_image, sample_mask)
+
+
+EPOCHS = 30
+STEPS_PER_EPOCH = TRAIN_LENGTH // BATCH_SIZE
+model_history = model.fit(train_dataset, epochs=EPOCHS,
+                          steps_per_epoch=STEPS_PER_EPOCH,
+                          validation_data=valid_dataset,
+                          callbacks=[DisplayCallback(), early_stop])
+
+# save the model
+model.save("best_conv.h5")
+print("Model saved successfully")
+
+for i in range(5):
+    for image, mask in valid.take(i):
+        sample_image, sample_mask = image, mask
+        show_predictions(sample_image, sample_mask)
+
+plt.figure(figsize=(15, 5))
+plt.subplot(1, 2, 1)
+plt.plot(model_history['loss'])
+plt.plot(model_history['val_loss'])
+plt.title('model loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'val'], loc='upper left')
+
+plt.subplot(1, 2, 2)
+plt.plot(model_history['accuracy'])
+plt.plot(model_history['val_accuracy'])
+plt.title('model accuracy')
+plt.ylabel('accuracy')
+plt.xlabel('epoch')
+plt.legend(['train', 'val'], loc='upper left')
+# Save the plot as an image
+plt.savefig('plot.png')
+plt.show()
